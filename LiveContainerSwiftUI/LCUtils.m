@@ -98,8 +98,6 @@ Class LCSharedUtilsClass = nil;
                     if(UIApplication.sharedApplication.supportsMultipleScenes && [[[NSUserDefaults alloc] initWithSuiteName:[LCUtils appGroupID]] integerForKey:@"LCMultitaskMode" ] == 1) {
                         [MultitaskWindowManager openAppWindowWithId:identifier ext:extension displayName:displayName dataUUID:selectedContainer];
                         
-                        // 添加到dock
-                        NSLog(@"[MultitaskDock] LCUtils - Adding app to dock: %@, UUID: %@", displayName, selectedContainer);
                         MultitaskDockManager *dock = [MultitaskDockManager shared];
                         [dock addRunningApp:displayName appUUID:selectedContainer];
                         
@@ -115,8 +113,6 @@ Class LCSharedUtilsClass = nil;
                 launcherView.center = view.center;
                 [view addSubview:launcherView];
                 
-                // 添加到dock (virtual window模式)
-                NSLog(@"[MultitaskDock] LCUtils - Adding app to dock (virtual mode): %@, UUID: %@", displayName, selectedContainer);
                 MultitaskDockManager *dock = [MultitaskDockManager shared];
                 [dock addRunningApp:displayName appUUID:selectedContainer];
                 

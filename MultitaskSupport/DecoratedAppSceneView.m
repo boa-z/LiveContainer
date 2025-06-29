@@ -180,8 +180,6 @@ void UIKitFixesInit(void) {
                      completion:^(BOOL finished) {
                          self.hidden = YES;
                      }];
-    
-    NSLog(@"[MultitaskSupport] Minimized window for dataUUID: %@", self.dataUUID);
 }
 
 - (void)maximizeWindow {
@@ -200,7 +198,6 @@ void UIKitFixesInit(void) {
                              CGSize size = self.contentView.bounds.size;
                              [self.appSceneView resizeWindowWithFrame:CGRectMake(0, 0, size.width / self.scaleRatio, size.height / self.scaleRatio)];
                          }];
-        NSLog(@"[MultitaskSupport] Restored window size for dataUUID: %@", self.dataUUID);
     } else {
         self.originalFrame = self.frame;
         
@@ -235,7 +232,6 @@ void UIKitFixesInit(void) {
                              CGSize size = self.contentView.bounds.size;
                              [self.appSceneView resizeWindowWithFrame:CGRectMake(0, 0, size.width / self.scaleRatio, size.height / self.scaleRatio)];
                          }];
-        NSLog(@"[MultitaskSupport] Maximized window for dataUUID: %@", self.dataUUID);
     }
 }
 
@@ -275,7 +271,6 @@ void UIKitFixesInit(void) {
                 [invocation setSelector:@selector(setSpacing:)];
                 [invocation setArgument:&spacing atIndex:2];
                 [invocation invoke];
-                NSLog(@"[MultitaskSupport] Set button spacing to %.1f", spacing);
             }
             
             if (subview.superview) {
@@ -283,7 +278,6 @@ void UIKitFixesInit(void) {
                     if ((constraint.firstItem == subview && constraint.firstAttribute == NSLayoutAttributeTrailing) ||
                         (constraint.secondItem == subview && constraint.secondAttribute == NSLayoutAttributeTrailing)) {
                         constraint.constant = (constraint.firstItem == subview) ? -margin : margin;
-                        NSLog(@"[MultitaskSupport] Adjusted right margin constraint to %.1f", constraint.constant);
                         break;
                     }
                 }
