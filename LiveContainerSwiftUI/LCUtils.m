@@ -4,6 +4,7 @@
 @import UniformTypeIdentifiers;
 
 #import "LCUtils.h"
+#import "LCAppInfo.h"
 #import "../MultitaskSupport/DecoratedAppSceneView.h"
 #import "../ZSign/zsigner.h"
 #import "LiveContainerSwiftUI-Swift.h"
@@ -96,6 +97,12 @@ Class LCSharedUtilsClass = nil;
                 if (@available(iOS 16.1, *)) {
                     if(UIApplication.sharedApplication.supportsMultipleScenes && [[[NSUserDefaults alloc] initWithSuiteName:[LCUtils appGroupID]] integerForKey:@"LCMultitaskMode" ] == 1) {
                         [MultitaskWindowManager openAppWindowWithId:identifier ext:extension displayName:displayName dataUUID:selectedContainer];
+                        
+                        // 添加到dock
+                        NSLog(@"[MultitaskDock] LCUtils - Adding app to dock: %@, UUID: %@", displayName, selectedContainer);
+                        MultitaskDockManager *dock = [MultitaskDockManager shared];
+                        [dock addRunningApp:displayName appUUID:selectedContainer];
+                        
                         completionHandler(nil);
                         return;
                     }
@@ -107,6 +114,12 @@ Class LCSharedUtilsClass = nil;
                 DecoratedAppSceneView *launcherView = [[DecoratedAppSceneView alloc] initWithExtension:extension identifier:identifier windowName:displayName dataUUID:selectedContainer];
                 launcherView.center = view.center;
                 [view addSubview:launcherView];
+                
+                // 添加到dock (virtual window模式)
+                NSLog(@"[MultitaskDock] LCUtils - Adding app to dock (virtual mode): %@, UUID: %@", displayName, selectedContainer);
+                MultitaskDockManager *dock = [MultitaskDockManager shared];
+                [dock addRunningApp:displayName appUUID:selectedContainer];
+                
                 completionHandler(nil);
             } else {
                 NSError *error = [NSError errorWithDomain:displayName code:2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to start app. Child process has unexpectedly crashed"}];
