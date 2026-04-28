@@ -5,6 +5,7 @@
 //  Created by s s on 2025/2/7.
 //
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #import "../../litehook/src/litehook.h"
@@ -395,25 +396,81 @@ void* getGuestAppHeader(void) {
 #define HOOK_LOCK_1ST_ARG
 #endif
 static void *lockPtrToIgnore;
-static mach_port_t tidToIgnore;
-void hook_libdyld_os_unfair_recursive_lock_lock_with_options(HOOK_LOCK_1ST_ARG void* lock, uint32_t options) {
-    if(!lockPtrToIgnore) lockPtrToIgnore = lock;
-    if(lock != lockPtrToIgnore || tidToIgnore != mach_thread_self()) {
-        os_unfair_recursive_lock_lock_with_options(lock, options);
-    }
+static void *couldDlopenLockStart;
+static void *couldDlopenLockEnd;
+static bool didInitCouldDlopenLockCallers;
+static __thread uint64_t ignoredDlopenNolockThread;
+
+static inline uint64_t currentThreadID(void) {
+    uint64_t tid = 0;
+    pthread_threadid_np(NULL, &tid);
+    return tid;
 }
-void hook_libdyld_os_unfair_recursive_lock_unlock(HOOK_LOCK_1ST_ARG void* lock) {
-    if(lock != lockPtrToIgnore || tidToIgnore != mach_thread_self()) {
-        os_unfair_recursive_lock_unlock(lock);
+
+static bool isCouldDlopenLockAvailable(void) {
+    uintptr_t start = (uintptr_t)couldDlopenLockStart;
+    uintptr_t end = (uintptr_t)couldDlopenLockEnd;
+    return start && end && start < end && end - start < 0x1000;
+}
+
+static void initCouldDlopenLockCallers(void) {
+    if(didInitCouldDlopenLockCallers) {
+        return;
+    }
+    
+    didInitCouldDlopenLockCallers = true;
+
+    const char *dyldPath = "/usr/lib/dyld";
+    couldDlopenLockStart = litehook_find_dsc_symbol(dyldPath, "__ZN5dyld412RuntimeLocks15couldDlopenLockEv");
+    couldDlopenLockEnd = litehook_find_dsc_symbol(dyldPath, "__ZN5dyld412RuntimeLocks26resetDlopenLockInForkChildEv");
+
+    if(!isCouldDlopenLockAvailable()) {
+        couldDlopenLockStart = NULL;
+        couldDlopenLockEnd = NULL;
     }
 }
 
+static bool isCouldDlopenLockCaller(void *caller) {
+    // iOS 26.5 couldDlopenLock performs its own try-lock; only its internal cleanup unlock should pass through.
+    if(!isCouldDlopenLockAvailable()) {
+        return false;
+    }
+
+    uintptr_t current = (uintptr_t)caller;
+    return current >= (uintptr_t)couldDlopenLockStart && current < (uintptr_t)couldDlopenLockEnd;
+}
+
+void hook_libdyld_os_unfair_recursive_lock_lock_with_options(HOOK_LOCK_1ST_ARG void* lock, uint32_t options) {
+    if(!lockPtrToIgnore) {
+        lockPtrToIgnore = lock;
+    }
+    uint64_t currentThread = currentThreadID();
+    if(lock == lockPtrToIgnore && ignoredDlopenNolockThread == currentThread) {
+        return;
+    }
+    os_unfair_recursive_lock_lock_with_options(lock, options);
+}
+
+void hook_libdyld_os_unfair_recursive_lock_unlock(HOOK_LOCK_1ST_ARG void* lock) {
+    uint64_t currentThread = currentThreadID();
+    if(lock == lockPtrToIgnore && ignoredDlopenNolockThread == currentThread) {
+        if(isCouldDlopenLockCaller(__builtin_return_address(0))) {
+            os_unfair_recursive_lock_unlock(lock);
+        }
+        return;
+    }
+    os_unfair_recursive_lock_unlock(lock);
+}
+
 void *dlopen_nolock(const char *path, int mode) {
-    tidToIgnore = mach_thread_self();
+    lockPtrToIgnore = NULL;
+    ignoredDlopenNolockThread = currentThreadID();
     const char *libdyldPath = "/usr/lib/system/libdyld.dylib";
     mach_header_u *libdyldHeader = LCGetLoadedImageHeader(0, libdyldPath);
     assert(libdyldHeader != NULL);
 #if !TARGET_OS_SIMULATOR
+    initCouldDlopenLockCallers();
+
     NSString *lockUnlockPtrName = @"dyld4::LibSystemHelpers::os_unfair_recursive_lock_lock_with_options";
     void **lockUnlockPtr = getCachedSymbol(lockUnlockPtrName, libdyldHeader);
     if(!lockUnlockPtr) {
@@ -463,12 +520,16 @@ void *dlopen_nolock(const char *path, int mode) {
         assert(os_tpro_is_supported());
         os_thread_self_restrict_tpro_to_rw();
     }
+    lockPtrToIgnore = NULL;
+    ignoredDlopenNolockThread = 0;
 #else
     litehook_rebind_symbol(libdyldHeader, os_unfair_recursive_lock_lock_with_options, hook_libdyld_os_unfair_recursive_lock_lock_with_options, nil);
     litehook_rebind_symbol(libdyldHeader, os_unfair_recursive_lock_unlock, hook_libdyld_os_unfair_recursive_lock_unlock, nil);
     void *result = dlopen(path, mode);
     litehook_rebind_symbol(libdyldHeader, hook_libdyld_os_unfair_recursive_lock_lock_with_options, os_unfair_recursive_lock_lock_with_options, nil);
     litehook_rebind_symbol(libdyldHeader, hook_libdyld_os_unfair_recursive_lock_unlock, os_unfair_recursive_lock_unlock, nil);
+    lockPtrToIgnore = NULL;
+    ignoredDlopenNolockThread = 0;
 #endif
     return result;
 }
